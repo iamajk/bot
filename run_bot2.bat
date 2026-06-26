@@ -19,7 +19,7 @@ if errorlevel 1 (
 )
 
 echo [1/3] Python found. Installing dependencies...
-python -m pip install -r requirements.txt --quiet
+python -m pip install playwright anthropic
 if errorlevel 1 (
     echo ERROR: Failed to install dependencies.
     pause
