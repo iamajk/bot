@@ -64,18 +64,26 @@ PROMO_TRIGGERS = [
 #   name             - friendly label used in logs
 CHAT_SITES = [
     {
-        "name": "SillyChat",
-        "url": "https://silly.chat/text-chat",
-        "message_selector": "[class*=message]",        # not used (bot only blasts)
-        "input_selector": "input[placeholder='Message...']",
-        "send_selector": None,                          # Enter key sends
-        "start_selector": None,                         # custom setup clicks "I Agree"
-        "silly_setup": True,
-        "disconnect_selector": "text=Next",
-        "fast_skip": True,                              # Next needs two rapid clicks
-        "connected_placeholder": "Message",
+        "name": "IncogChats",
+        "url": "https://www.incogchats.com/chat-app",
+        "message_selector": "[class*=message]",
+        "input_selector": "textarea[placeholder*='Type a message']",
+        "send_selector": None,
+        "start_selector": None,
+        "incog_setup": True,
+        "disconnect_selector": "button[aria-label='Skip and find new partner']",
+        "js_skip_aria": "Skip",
+        "post_skip_wait": 10,
+        "connected_placeholder": "Type a message",
+        "obfuscate_url": [
+            "strangermeet dot org (dot = period)",
+            "strangermeet dot org (dot means period)",
+            "strangermeet . org",
+            "strangermeet(.)org",
+            "strangermeet[.]org",
+        ],
         "system_skip_keywords": [
-            "connected", "stranger", "start chatting", "looking for",
+            "connected", "stranger", "looking", "matched", "say hi",
         ],
     },
     {
