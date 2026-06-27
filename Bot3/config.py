@@ -71,7 +71,7 @@ CHAT_SITES = [
         "send_selector": None,
         "knotchat_setup": True,
         "reload_on_skip": True,
-        "post_skip_wait": 10,
+        "post_skip_wait": 3,
         "connected_placeholder": "",
         "system_skip_keywords": [
             "connected", "stranger", "looking", "matched", "say hi", "next",

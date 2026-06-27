@@ -248,21 +248,18 @@ class ChatBot:
         self._ctx = page
         try:
             # Click the "Text" tab
-            await page.evaluate("""() => {
-                const b = [...document.querySelectorAll('button,div,span')].find(x => x.textContent.trim() === 'Text');
-                if (b) b.click();
-            }""")
+            try:
+                await page.click("text=Text", timeout=5000)
+            except Exception:
+                pass
             await asyncio.sleep(1)
             # Click "Start Chatting"
-            await page.evaluate("""() => {
-                const b = [...document.querySelectorAll('button')].find(x => /start chatting/i.test(x.textContent.trim()));
-                if (b) b.click();
-            }""")
+            await page.click("text=Start Chatting", timeout=8000)
             log(self.name, "KnotChat setup done — waiting for stranger")
         except Exception as e:
             log(self.name, f"KnotChat setup error: {e}")
-        await asyncio.sleep(4)
-        self._skip_after = 5
+        await asyncio.sleep(5)
+        self._skip_after = 8
         self._reply_count = 0
         self._chat_start_time = 0
 
