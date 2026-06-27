@@ -85,6 +85,8 @@ class ChatBot:
             await self._setup_ome(page)
         elif name == "StrangerLine":
             await self._setup_strangerline(page)
+        elif name == "KnotChat":
+            await self._setup_knotchat(page)
         else:
             self._ctx = page
 
@@ -240,6 +242,29 @@ class ChatBot:
         self._skip_after = 5
         self._reply_count = 0
         self._chat_start_time = 0  # opener waits for connection
+
+    async def _setup_knotchat(self, page: Page) -> None:
+        """KnotChat: click Text mode → Start Chatting → wait for chat UI."""
+        self._ctx = page
+        try:
+            # Click the "Text" tab
+            await page.evaluate("""() => {
+                const b = [...document.querySelectorAll('button,div,span')].find(x => x.textContent.trim() === 'Text');
+                if (b) b.click();
+            }""")
+            await asyncio.sleep(1)
+            # Click "Start Chatting"
+            await page.evaluate("""() => {
+                const b = [...document.querySelectorAll('button')].find(x => /start chatting/i.test(x.textContent.trim()));
+                if (b) b.click();
+            }""")
+            log(self.name, "KnotChat setup done — waiting for stranger")
+        except Exception as e:
+            log(self.name, f"KnotChat setup error: {e}")
+        await asyncio.sleep(4)
+        self._skip_after = 5
+        self._reply_count = 0
+        self._chat_start_time = 0
 
     async def _setup_viby(self, page: Page) -> None:
         """Viby: landing → modal (Female + age) → chat. Robust to any entry state."""
