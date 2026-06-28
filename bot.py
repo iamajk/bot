@@ -85,8 +85,28 @@ class ChatBot:
             await self._setup_ome(page)
         elif name == "StrangerLine":
             await self._setup_strangerline(page)
+        elif name == "TalkWithStranger":
+            await self._setup_tws(page)
         else:
             self._ctx = page
+
+    async def _setup_tws(self, page: Page) -> None:
+        """TalkWithStranger: wait for chat UI to load, dismiss any popups."""
+        self._ctx = page
+        try:
+            for btn_text in ["I Agree", "Accept", "OK", "Got it", "Continue"]:
+                try:
+                    await page.click(f"text={btn_text}", timeout=3000)
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+            log(self.name, "TalkWithStranger setup done — waiting for stranger")
+        except Exception as e:
+            log(self.name, f"TalkWithStranger setup error: {e}")
+        await asyncio.sleep(4)
+        self._skip_after = 8
+        self._reply_count = 0
+        self._chat_start_time = 0
 
     async def _setup_meetzur(self, page: Page) -> None:
         """Handle Meetzur: agree button → iframe → JS checkbox → enter chat → start."""

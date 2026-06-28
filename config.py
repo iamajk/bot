@@ -64,6 +64,20 @@ PROMO_TRIGGERS = [
 #   name             - friendly label used in logs
 CHAT_SITES = [
     {
+        "name": "TalkWithStranger",
+        "url": "https://talkwithstranger.com/talk-to-strangers",
+        "message_selector": "[class*=message]",
+        "input_selector": "input[placeholder*='message'], input[placeholder*='Message'], textarea[placeholder*='message'], textarea[placeholder*='Message']",
+        "send_selector": None,
+        "tws_setup": True,
+        "reload_on_skip": True,
+        "post_skip_wait": 5,
+        "connected_placeholder": "",
+        "system_skip_keywords": [
+            "connected", "stranger", "looking", "connecting", "say hi",
+        ],
+    },
+    {
         "name": "SillyChat",
         "url": "https://silly.chat/text-chat",
         "message_selector": "[class*=message]",        # not used (bot only blasts)
