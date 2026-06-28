@@ -856,7 +856,7 @@ class BotManager:
         self.site_configs = site_configs
 
     # Restart the whole browser this often to clear caches/memory and stay fast
-    RESTART_EVERY_SECONDS = 15 * 60
+    RESTART_EVERY_SECONDS = 30 * 60
 
     async def run(self) -> None:
         # Outer loop: every RESTART_EVERY_SECONDS, tear everything down and start fresh.
