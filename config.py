@@ -96,19 +96,27 @@ CHAT_SITES = [
             "connected", "find new stranger",
         ],
     },
-    # TalkWithStranger removed — site added Cloudflare bot-protection (won't bypass).
     {
-        "name": "OpenTalk",
-        "url": "https://opentalk.club/text/",
-        "message_selector": "#chatMsgs .msg.them",
-        "input_selector": "#chatInput",
-        "send_selector": "#chatSend",
-        "start_selector": "#startBtn",
-        "disconnect_selector": "#startBtn",
-        "onboard_click": ".ot-onb-action",      # clicks the first gender button (girl)
+        "name": "IncogChats",
+        "url": "https://www.incogchats.com/chat-app",
+        "message_selector": "[class*=message]",
+        "input_selector": "textarea[placeholder*='Type a message']",
+        "send_selector": None,
+        "start_selector": None,
+        "incog_setup": True,
+        "disconnect_selector": "button[aria-label='Skip and find new partner']",
+        "js_skip_aria": "Skip",
+        "post_skip_wait": 10,
+        "connected_placeholder": "Type a message",
+        "obfuscate_url": [
+            "strangermeet dot org (dot = period)",
+            "strangermeet dot org (dot means period)",
+            "strangermeet . org",
+            "strangermeet(.)org",
+            "strangermeet[.]org",
+        ],
         "system_skip_keywords": [
-            "chatting with a stranger", "stranger has disconnected",
-            "looking for", "connected", "are you a girl",
+            "connected", "stranger", "looking", "matched", "say hi",
         ],
     },
 ]

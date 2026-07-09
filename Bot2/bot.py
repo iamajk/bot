@@ -67,7 +67,7 @@ class ChatBot:
         name = self.name
         if name == "Meetzur":
             await self._setup_meetzur(page)
-        elif name == "OpenTalk":
+        elif name.startswith("OpenTalk"):
             await self._setup_opentalk(page)
         elif name == "TalkWithStranger":
             await self._setup_talkwithstranger(page)
@@ -638,7 +638,7 @@ class ChatBot:
         name = self.name
         if name == "Meetzur":
             await self._setup_meetzur(page)
-        elif name == "OpenTalk":
+        elif name.startswith("OpenTalk"):
             await self._setup_opentalk(page)
         elif name == "TalkWithStranger":
             await self._setup_talkwithstranger(page)
@@ -886,7 +886,10 @@ class BotManager:
                 bot = ChatBot(site_config=site, personality_key=personality)
                 tasks.append(asyncio.create_task(bot.run(page)))
                 log("manager", f"Tab opened for '{site['name']}' [{personality}]")
-                await asyncio.sleep(1)  # stagger tab launches slightly
+                # Extra stagger for OpenTalk tabs so they don't start at the same
+                # moment and end up paired with each other.
+                extra_gap = 8 if site["name"].startswith("OpenTalk") else 1
+                await asyncio.sleep(extra_gap)
 
             try:
                 # Run the bots, but only for the restart window

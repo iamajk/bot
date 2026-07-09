@@ -64,48 +64,6 @@ PROMO_TRIGGERS = [
 #   name             - friendly label used in logs
 CHAT_SITES = [
     {
-        "name": "IncogChats",
-        "url": "https://www.incogchats.com/chat-app",
-        "message_selector": "[class*=message]",
-        "input_selector": "textarea[placeholder*='Type a message']",
-        "send_selector": None,
-        "start_selector": None,
-        "incog_setup": True,
-        "disconnect_selector": "button[aria-label='Skip and find new partner']",
-        "js_skip_aria": "Skip",
-        "post_skip_wait": 10,
-        "connected_placeholder": "Type a message",
-        "obfuscate_url": [
-            "strangermeet dot org (dot = period)",
-            "strangermeet dot org (dot means period)",
-            "strangermeet . org",
-            "strangermeet(.)org",
-            "strangermeet[.]org",
-        ],
-        "system_skip_keywords": [
-            "connected", "stranger", "looking", "matched", "say hi",
-        ],
-    },
-    {
-        "name": "OnlineStranger",
-        "url": "https://onlinestranger.com/chat",
-        "message_selector": "[class*=message]",     # not used (bot only blasts)
-        "input_selector": ".flex-1.bg-transparent",
-        "send_selector": None,                        # custom JS send
-        "send_via_js": True,
-        "start_selector": None,                       # custom setup (terms gate)
-        "disconnect_selector": "button[title='End Chat']",
-        "confirm_selector": "text=Yes, End Chat",      # confirmation modal
-        "reconnect_selector": "text=Find New Stranger",
-        "connected_placeholder": "Type a message",
-        "dismiss_selectors": ["text=Maybe Later"],   # auto-dismiss popups
-        "system_skip_keywords": [
-            "you are now", "stranger has disconnected", "looking for",
-            "connected", "find new stranger",
-        ],
-    },
-    # TalkWithStranger removed — site added Cloudflare bot-protection (won't bypass).
-    {
         "name": "OpenTalk",
         "url": "https://opentalk.club/text/",
         "message_selector": "#chatMsgs .msg.them",
@@ -114,6 +72,20 @@ CHAT_SITES = [
         "start_selector": "#startBtn",
         "disconnect_selector": "#startBtn",
         "onboard_click": ".ot-onb-action",      # clicks the first gender button (girl)
+        "system_skip_keywords": [
+            "chatting with a stranger", "stranger has disconnected",
+            "looking for", "connected", "are you a girl",
+        ],
+    },
+    {
+        "name": "OpenTalk2",
+        "url": "https://opentalk.club/text/",
+        "message_selector": "#chatMsgs .msg.them",
+        "input_selector": "#chatInput",
+        "send_selector": "#chatSend",
+        "start_selector": "#startBtn",
+        "disconnect_selector": "#startBtn",
+        "onboard_click": ".ot-onb-action",
         "system_skip_keywords": [
             "chatting with a stranger", "stranger has disconnected",
             "looking for", "connected", "are you a girl",
