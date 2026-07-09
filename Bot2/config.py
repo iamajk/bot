@@ -91,6 +91,20 @@ CHAT_SITES = [
             "looking for", "connected", "are you a girl",
         ],
     },
+    {
+        "name": "Viby",
+        "url": "https://viby.chat/",
+        "message_selector": "[class*=message]",
+        "input_selector": "input.input-field[type=text]",
+        "send_selector": None,
+        "disconnect_selector": "text=Next",
+        "reload_on_skip": True,
+        "post_skip_wait": 5,
+        "connected_placeholder": "",
+        "system_skip_keywords": [
+            "connected", "stranger", "say hi", "looking",
+        ],
+    },
 ]
 
 # ─────────────────────────────────────────────

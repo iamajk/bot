@@ -42,6 +42,7 @@ class ChatBot:
         self._page = None
         # Pick a fresh girl name per bot instance (changes on every 15-min restart)
         self._girl_name: str = random.choice(GIRL_NAMES)
+        self.had_saved_session: bool = False
         log(self.name, f"Created — personality: {personality_key}")
 
     # ── SETUP ──────────────────────────────────────────────────────────────
@@ -246,6 +247,14 @@ class ChatBot:
         self._ctx = page
         self._skip_after = 8
         self._reply_count = 0
+        if not self.had_saved_session:
+            log(self.name, "=" * 60)
+            log(self.name, "NO SAVED LOGIN FOUND — please sign in or sign up on the")
+            log(self.name, "Viby tab now (email + password). You have 45 seconds.")
+            log(self.name, "Once signed in, the bot saves this login automatically")
+            log(self.name, "and you won't need to do this again on future restarts.")
+            log(self.name, "=" * 60)
+            await asyncio.sleep(45)
         ok = await self._viby_enter()
         # Always reset the timer — opener's _wait_connected handles the rest.
         # (If we skip this on failure, the stale timer triggers an instant reload loop.)
@@ -865,6 +874,8 @@ class BotManager:
             log("manager", "Session ended — restarting fresh in 3s to clear caches")
             await asyncio.sleep(3)
 
+    STORAGE_STATE_PATH = os.path.join(os.path.dirname(__file__), "browser_session.json")
+
     async def _run_session(self) -> None:
         personality_keys = list(PERSONALITIES.keys())
         async with async_playwright() as pw:
@@ -878,12 +889,18 @@ class BotManager:
             browser: Browser = await pw.chromium.launch(**launch_kwargs)
             # One shared context so all sites open as TABS in a single window,
             # and no_viewport lets each tab fill the maximized window (input visible).
-            context = await browser.new_context(no_viewport=True)
+            # Reuse a saved login session (e.g. Viby) across restarts if present.
+            context_kwargs: dict = {"no_viewport": True}
+            if os.path.exists(self.STORAGE_STATE_PATH):
+                context_kwargs["storage_state"] = self.STORAGE_STATE_PATH
+            had_saved_session = "storage_state" in context_kwargs
+            context = await browser.new_context(**context_kwargs)
             tasks = []
             for i, site in enumerate(self.site_configs):
                 personality = personality_keys[i % len(personality_keys)]
                 page = await context.new_page()
                 bot = ChatBot(site_config=site, personality_key=personality)
+                bot.had_saved_session = had_saved_session
                 tasks.append(asyncio.create_task(bot.run(page)))
                 log("manager", f"Tab opened for '{site['name']}' [{personality}]")
                 # Extra stagger for OpenTalk tabs so they don't start at the same
@@ -902,6 +919,11 @@ class BotManager:
             except asyncio.CancelledError:
                 pass
             finally:
+                try:
+                    await context.storage_state(path=self.STORAGE_STATE_PATH)
+                    log("manager", "Saved login session for next restart")
+                except Exception as e:
+                    log("manager", f"Could not save session: {e}")
                 for t in tasks:
                     t.cancel()
                 try:
