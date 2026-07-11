@@ -286,7 +286,7 @@ class ChatBot:
         except Exception as e:
             log(self.name, f"KnotChat setup error: {e}")
         await asyncio.sleep(4)
-        self._skip_after = 10 ** 9
+        self._skip_after = random.uniform(9, 12)  # real "Leave" button found — skip normally now
         self._reply_count = 0
         self._chat_start_time = 0
 
@@ -1246,12 +1246,15 @@ class ChatBot:
                 await btn.click(timeout=4000)
                 await asyncio.sleep(0.8)
 
-            # Step 2: confirmation dialog (e.g. "Sure?" / "Yes, End Chat")
+            # Step 2: confirmation dialog (e.g. "Sure?" / "Yes, End Chat" /
+            # KnotChat's "Confirm leaving?" modal). Prefer the LAST matching
+            # element — modals render after the original button in the DOM,
+            # so .last targets the confirm button, not the one already clicked.
             if confirm_sel:
                 try:
-                    c = await self._ctx.wait_for_selector(confirm_sel, timeout=3000)
-                    if c and await c.is_visible():
-                        await c.click(timeout=4000)
+                    loc = self._ctx.locator(confirm_sel).last
+                    if await loc.count() > 0:
+                        await loc.click(timeout=4000, force=True)
                         await asyncio.sleep(1.0)
                 except Exception:
                     pass

@@ -122,6 +122,8 @@ class ChatBot:
             await self._setup_knotchat(page)
         elif name == "RandomChatTWS":
             await self._setup_randomchattws(page)
+        elif name == "Joingy":
+            await self._setup_joingy(page)
         else:
             self._ctx = page
 
@@ -180,6 +182,33 @@ class ChatBot:
         self._skip_after = random.uniform(10, 14)
         self._reply_count = 0
         self._chat_start_time = 0
+
+    async def _dump_debug_snapshot(self) -> None:
+        """Dump the real page's clickable elements (text/tag/class/visibility)
+        to a JSON file next to bot.py, so exact selectors can be read instead
+        of guessed from screenshots. Overwrites each time — check after a stuck
+        cycle by opening Bot2/debug_<site>.json."""
+        if not self._ctx:
+            return
+        try:
+            data = await self._ctx.evaluate("""() => {
+                const els = [...document.querySelectorAll('button,a,[role=button],input,textarea')];
+                return els.map(el => ({
+                    tag: el.tagName,
+                    text: (el.textContent || el.value || '').trim().slice(0, 60),
+                    class: (el.className || '').toString().slice(0, 80),
+                    visible: el.offsetParent !== null,
+                    placeholder: el.getAttribute('placeholder') || null,
+                    disabled: el.disabled || false,
+                }));
+            }""")
+            import json
+            path = os.path.join(os.path.dirname(__file__), f"debug_{self.name}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            log(self.name, f"Dumped debug snapshot to {path}")
+        except Exception as e:
+            log(self.name, f"Debug dump failed: {e}")
 
     async def _randomchattws_close_popup(self, page: Page) -> None:
         """Close the '<N> people online right now' banner (it overlaps controls)."""
@@ -240,6 +269,61 @@ class ChatBot:
             return clicked
         except Exception:
             return False
+
+    async def _setup_joingy(self, page: Page) -> None:
+        """Joingy: close promo overlay, ensure 18+ box checked, click Text Only.
+        Humanized (natural mouse movement + slower randomized delays) — this
+        site permanently banned a fast/robotic run before, so pace everything
+        like a real person and rely on clear_cookies_domain for a fresh
+        identity each cycle instead of blasting fast."""
+        self._ctx = page
+        try:
+            await _human_mouse_move(page)
+            # Close the "Girls Roulette" promo overlay if present (its own X button)
+            await page.evaluate("""() => {
+                const closeBtns = [...document.querySelectorAll('*')]
+                    .filter(el => el.offsetParent !== null && el.children.length === 0
+                        && ['×','✕','✖','x'].includes((el.textContent||'').trim()));
+                closeBtns.forEach(b => { try { b.click(); } catch(e) {} });
+            }""")
+            await asyncio.sleep(random.uniform(0.6, 1.2))
+            await _human_mouse_move(page)
+            # Ensure 18+ checkbox is checked
+            await page.evaluate("""() => {
+                const cb = [...document.querySelectorAll('input[type=checkbox]')]
+                    .find(x => x.offsetParent !== null && !x.checked);
+                if (cb) { cb.click(); cb.dispatchEvent(new Event('change', {bubbles:true})); }
+            }""")
+            await asyncio.sleep(random.uniform(0.6, 1.2))
+            await _human_mouse_move(page)
+            # Click "Text Only" — walk up from any element containing the text
+            # to its clickable ancestor, and dispatch a real click event.
+            clicked = await page.evaluate("""() => {
+                const all = [...document.querySelectorAll('*')];
+                const hit = all.find(el =>
+                    el.offsetParent !== null &&
+                    (el.textContent || '').toLowerCase().includes('text only') &&
+                    el.children.length <= 2
+                );
+                if (!hit) return false;
+                let target = hit.closest('button,a,[role=button]') || hit;
+                ['mousedown','mouseup','click'].forEach(type => {
+                    target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true}));
+                });
+                return true;
+            }""")
+            if not clicked:
+                try:
+                    await page.click("text=Text Only", timeout=5000)
+                except Exception:
+                    pass
+            log(self.name, "Joingy setup done — waiting for stranger")
+        except Exception as e:
+            log(self.name, f"Joingy setup error: {e}")
+        await asyncio.sleep(random.uniform(3, 5))
+        self._skip_after = random.uniform(12, 18)  # slower cadence — this site bans fast bots
+        self._reply_count = 0
+        self._chat_start_time = 0
 
     async def _setup_knotchat(self, page: Page) -> None:
         """KnotChat: Text tab → Start Chatting → Female + 18-23 → START CHATTING
@@ -1071,6 +1155,8 @@ class ChatBot:
             await self._setup_knotchat(page)
         elif name == "RandomChatTWS":
             await self._setup_randomchattws(page)
+        elif name == "Joingy":
+            await self._setup_joingy(page)
         else:
             self._ctx = page
 
@@ -1145,6 +1231,105 @@ class ChatBot:
         if not self._ctx:
             return
 
+        # Same-page skip: end the current chat and click "1-1 Chat" again on
+        # the SAME page — no full URL reload, matching the original working
+        # behavior (much faster and lighter than a full page reload).
+        if self.site.get("same_page_skip"):
+            self._skip_total += 1
+            if skip_sel:
+                label = skip_sel.replace("text=", "").strip()
+
+                async def _click_label(txt: str) -> bool:
+                    try:
+                        loc = self._ctx.locator(f"text={txt}").last
+                        if await loc.count() > 0:
+                            await loc.click(timeout=3000, force=True)
+                            return True
+                    except Exception:
+                        pass
+                    try:
+                        return await self._ctx.evaluate("""(t) => {
+                            const el = [...document.querySelectorAll('button,a,[role=button],div,span')]
+                                .find(x => (x.textContent||'').trim().toLowerCase() === t.toLowerCase()
+                                           && x.offsetParent !== null);
+                            if (el) {
+                                const target = el.closest('button,a,[role=button]') || el;
+                                ['mousedown','mouseup','click'].forEach(e =>
+                                    target.dispatchEvent(new MouseEvent(e, {bubbles:true, cancelable:true})));
+                                return true;
+                            }
+                            return false;
+                        }""", txt)
+                    except Exception:
+                        return False
+
+                # "Stop Chat" is ALWAYS present in ANY active chat (old or new),
+                # so its disappearance can't prove we actually left. Instead,
+                # snapshot the chat log text NOW, then after clicking + rejoining
+                # verify the log actually CHANGED (cleared/different messages) —
+                # that's the only reliable proof we're with a new stranger.
+                try:
+                    before_log = await self._ctx.evaluate(
+                        "() => (document.body.innerText || '').slice(-800)"
+                    )
+                except Exception:
+                    before_log = ""
+
+                async def _click_confirm_dialog() -> None:
+                    """Click a confirmation dialog's Yes/Sure/Confirm/Stop/End
+                    button — substring match, since real text is often like
+                    'Yes, I'm sure' rather than an exact 'sure' match."""
+                    try:
+                        await self._ctx.evaluate("""() => {
+                            const words = ['sure','yes','confirm','stop chat','end chat','stop','end','ok'];
+                            const els = [...document.querySelectorAll('button,a,[role=button]')]
+                                .filter(x => x.offsetParent !== null);
+                            const b = els.find(x => {
+                                const t = (x.textContent || '').trim().toLowerCase();
+                                return t.length > 0 && t.length < 30 && words.some(w => t.includes(w));
+                            });
+                            if (b) b.click();
+                        }""")
+                    except Exception:
+                        pass
+
+                for skip_attempt in range(3):
+                    await _click_label(label)
+                    await asyncio.sleep(0.15)
+                    await _click_label(label)
+                    await asyncio.sleep(0.5)
+                    await _click_confirm_dialog()
+                    await asyncio.sleep(0.5)
+
+                    wait = self.site.get("post_skip_wait", 0)
+                    if wait:
+                        await asyncio.sleep(wait)
+
+                    await _human_mouse_move(self._ctx)
+                    await self._randomchattws_enter(self._ctx)
+                    await asyncio.sleep(random.uniform(1.5, 2.5))
+
+                    try:
+                        after_log = await self._ctx.evaluate(
+                            "() => (document.body.innerText || '').slice(-800)"
+                        )
+                    except Exception:
+                        after_log = before_log  # treat as unchanged → retry
+
+                    if after_log != before_log:
+                        log(self.name, f"Skipped (same page, attempt {skip_attempt+1}) — new stranger confirmed")
+                        break
+                    log(self.name, f"Skip attempt {skip_attempt+1} — chat log unchanged, retrying")
+                else:
+                    log(self.name, "Could not confirm a new stranger after 3 attempts")
+                    await self._dump_debug_snapshot()
+            self.seen_messages.clear()
+            self.history.clear()
+            self.promo_done = False
+            self._reply_count = 0
+            self._chat_start_time = 0
+            return
+
         # Reload-based skip works even without a skip button — just reload the
         # page and re-run setup for a fresh stranger.
         if self.site.get("reload_on_skip"):
@@ -1203,6 +1388,34 @@ class ChatBot:
         if self._skip_total % 10 == 0:
             log(self.name, f"{self._skip_total} skips — refreshing page")
             await self._recover()
+            return
+
+        # Joingy: double-click Leave Chat, then click START A NEW CHAT
+        if self.site.get("double_skip_then_reconnect"):
+            try:
+                btn = await self._ctx.query_selector(skip_sel)
+                if btn and await btn.is_visible():
+                    await btn.click(timeout=4000)
+                    await asyncio.sleep(0.15)
+                    await btn.click(timeout=4000)
+            except Exception:
+                pass
+            await asyncio.sleep(random.uniform(0.8, 1.4))
+            if reconnect_sel:
+                try:
+                    new_btn = await self._ctx.wait_for_selector(reconnect_sel, timeout=5000)
+                    if new_btn and await new_btn.is_visible():
+                        await new_btn.click(timeout=4000)
+                except Exception:
+                    pass
+            log(self.name, "Skipped (double + reconnect) — waiting for new stranger")
+            self.seen_messages.clear()
+            self.history.clear()
+            self.promo_done = False
+            self._reply_count = 0
+            wait = self.site.get("post_skip_wait", 1.5)
+            await asyncio.sleep(wait)
+            self._chat_start_time = 0
             return
 
         # JS-click the skip button (intercepted button / icon-only) — auto-reconnects

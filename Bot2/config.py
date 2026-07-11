@@ -64,6 +64,26 @@ PROMO_TRIGGERS = [
 #   name             - friendly label used in logs
 CHAT_SITES = [
     {
+        "name": "Joingy",
+        "url": "https://joingy.com/",
+        "clear_cookies_domain": "joingy.com",
+        "clear_storage_on_reload": True,
+        "message_selector": "[class*=message]",
+        "input_selector": "input[type=text], textarea",
+        "send_selector": None,
+        "joingy_setup": True,
+        "human_pace": True,
+        "disconnect_selector": "text=Leave Chat",
+        "reconnect_selector": "text=START A NEW CHAT",
+        "double_skip_then_reconnect": True,
+        "post_skip_wait": 4,
+        "connected_placeholder": "",
+        "connected_text": ["now chatting with a random stranger"],
+        "system_skip_keywords": [
+            "connected", "stranger", "say hi", "looking",
+        ],
+    },
+    {
         "name": "RandomChatTWS",
         "url": "https://randomchat.talkwithstranger.com/",
         "clear_cookies_domain": "talkwithstranger.com",
@@ -74,9 +94,8 @@ CHAT_SITES = [
         "send_try_all": True,
         "randomchattws_setup": True,
         "human_pace": True,
-        "reload_on_skip": True,
+        "same_page_skip": True,
         "disconnect_selector": "text=Stop Chat",
-        "clear_storage_on_reload": True,
         "skip_immediately_after_send": True,
         "post_skip_wait": 3,
         "connected_when_input_ready": True,

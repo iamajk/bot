@@ -72,8 +72,9 @@ CHAT_SITES = [
         "send_button_text": "Send",
         "send_try_all": True,
         "knotchat_setup": True,
+        "disconnect_selector": "text=Leave",
+        "confirm_selector": "text=Leave",
         "reconnect_selector": "text=Restart",
-        "passive_skip_only": True,
         "post_skip_wait": 2,
         "connected_when_input_ready": True,
         "system_skip_keywords": [
