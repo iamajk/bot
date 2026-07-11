@@ -1,5 +1,6 @@
 import sys
 import io
+import os
 import asyncio
 import random
 
@@ -7,15 +8,24 @@ import random
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
+# Show the Viby login prompt FIRST, at the very top of the terminal, before
+# anything else starts logging and pushes it down/off screen.
+_SESSION_FILE = os.path.join(os.path.dirname(__file__), "browser_session.json")
+if not os.path.exists(_SESSION_FILE):
+    print("=" * 60)
+    print("VIBY LOGIN REQUIRED ON FIRST RUN")
+    print("Sign in on the Viby tab once it opens:")
+    print("  Login: 1@gmail.com / 123456  (or register a new account)")
+    print("This will be saved automatically for all future restarts.")
+    print("=" * 60)
+
 from config import CHAT_SITES, ANTHROPIC_API_KEY
 from bot import BotManager
 from utils import log
 
-# Bot 2 runs ALL sites (full coverage), same as Bot 1. The startup stagger below
-# keeps the two bots offset in time to reduce the chance they match each other.
+# Bot 2 runs a different set of sites than Bot 1, so no stagger is needed —
+# they can never end up paired with each other.
 MY_SITES = CHAT_SITES
-
-STARTUP_DELAY_SECONDS = 20
 
 
 def preflight_check() -> bool:
@@ -33,10 +43,6 @@ async def main() -> None:
     log("bot2", "AI Chat Bot 2 starting")
     if not preflight_check():
         sys.exit(1)
-    # Stagger start (plus a little jitter) so Bot 2 is offset from Bot 1
-    delay = STARTUP_DELAY_SECONDS + random.uniform(0, 6)
-    log("bot2", f"Waiting {delay:.0f}s to stagger from Bot 1...")
-    await asyncio.sleep(delay)
     log("bot2", f"Bot 2 sites: {[s['name'] for s in MY_SITES]}")
     manager = BotManager(site_configs=MY_SITES)
     try:

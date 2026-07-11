@@ -25,7 +25,7 @@ REPLY_DELAY_MIN = 1
 REPLY_DELAY_MAX = 3
 
 # Seconds between polling for new messages
-POLL_INTERVAL = 2
+POLL_INTERVAL = 1
 
 # Minimum message length to bother replying to
 MIN_MESSAGE_LENGTH = 1
@@ -64,22 +64,54 @@ PROMO_TRIGGERS = [
 #   name             - friendly label used in logs
 CHAT_SITES = [
     {
-        "name": "OpenTalk",
-        "url": "https://opentalk.club/text/",
-        "message_selector": "#chatMsgs .msg.them",
-        "input_selector": "#chatInput",
-        "send_selector": "#chatSend",
-        "start_selector": "#startBtn",
-        "disconnect_selector": "#startBtn",
-        "onboard_click": ".ot-onb-action",      # clicks the first gender button (girl)
+        "name": "RandomChatTWS",
+        "url": "https://randomchat.talkwithstranger.com/",
+        "clear_cookies_domain": "talkwithstranger.com",
+        "message_selector": "[class*=message]",
+        "input_selector": "input[placeholder*='Type a message' i], textarea[placeholder*='Type a message' i], input[placeholder*='message' i], textarea[placeholder*='message' i]",
+        "send_selector": None,
+        "send_button_text": "SEND",
+        "send_try_all": True,
+        "randomchattws_setup": True,
+        "human_pace": True,
+        "reload_on_skip": True,
+        "disconnect_selector": "text=Stop Chat",
+        "clear_storage_on_reload": True,
+        "skip_immediately_after_send": True,
+        "post_skip_wait": 3,
+        "connected_when_input_ready": True,
         "system_skip_keywords": [
-            "chatting with a stranger", "stranger has disconnected",
-            "looking for", "connected", "are you a girl",
+            "connected", "stranger", "looking", "connecting", "say hi",
+        ],
+    },
+    {
+        "name": "IncogChats",
+        "url": "https://www.incogchats.com/chat-app",
+        "clear_cookies_domain": "incogchats.com",
+        "message_selector": "[class*=message]",
+        "input_selector": "textarea[placeholder*='Type a message']",
+        "send_selector": None,
+        "start_selector": None,
+        "incog_setup": True,
+        "disconnect_selector": "button[aria-label='Skip and find new partner']",
+        "js_skip_aria": "Skip",
+        "post_skip_wait": 10,
+        "connected_placeholder": "Type a message",
+        "obfuscate_url": [
+            "strangermeet dot org (dot = period)",
+            "strangermeet dot org (dot means period)",
+            "strangermeet . org",
+            "strangermeet(.)org",
+            "strangermeet[.]org",
+        ],
+        "system_skip_keywords": [
+            "connected", "stranger", "looking", "matched", "say hi",
         ],
     },
     {
         "name": "OpenTalk2",
         "url": "https://opentalk.club/text/",
+        "clear_cookies_domain": "opentalk.club",
         "message_selector": "#chatMsgs .msg.them",
         "input_selector": "#chatInput",
         "send_selector": "#chatSend",
@@ -97,12 +129,13 @@ CHAT_SITES = [
         "message_selector": "[class*=message]",
         "input_selector": "input.input-field[type=text]",
         "send_selector": None,
-        "disconnect_selector": "text=Next",
-        "reload_on_skip": True,
-        "post_skip_wait": 5,
+        "disconnect_selector": "text=End Chat",
+        "js_confirm_text": "End Chat",
+        "reconnect_selector": "text=New Chat",
+        "post_skip_wait": 2,
         "connected_placeholder": "",
         "system_skip_keywords": [
-            "connected", "stranger", "say hi", "looking",
+            "connected", "stranger", "say hi", "looking", "partner left",
         ],
     },
 ]

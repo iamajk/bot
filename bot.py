@@ -5,6 +5,37 @@ from playwright.async_api import async_playwright, Page, Browser
 
 from config import POLL_INTERVAL, PERSONALITIES, GIRL_NAMES
 
+_FATAL_ERROR_MARKERS = (
+    "Connection closed while reading from the driver",
+    "browser has been closed",
+    "Target page, context or browser has been closed",
+    "Target closed",
+    "has been closed",
+)
+
+
+def _is_fatal_connection_error(e: Exception) -> bool:
+    """True if the browser/Playwright driver itself has died — retrying is useless
+    until the whole session restarts."""
+    msg = str(e)
+    return any(marker in msg for marker in _FATAL_ERROR_MARKERS)
+
+
+async def _human_mouse_move(page: Page) -> None:
+    """Move the mouse through a few random waypoints before acting, instead of
+    teleporting straight to a click target — cheap heuristic against bot checks."""
+    try:
+        viewport = page.viewport_size or {"width": 1280, "height": 800}
+        w, h = viewport["width"], viewport["height"]
+        steps = random.randint(2, 4)
+        for _ in range(steps):
+            x = random.randint(50, max(51, w - 50))
+            y = random.randint(50, max(51, h - 50))
+            await page.mouse.move(x, y, steps=random.randint(8, 20))
+            await asyncio.sleep(random.uniform(0.05, 0.2))
+    except Exception:
+        pass
+
 
 def _find_chrome() -> str | None:
     candidates = [
@@ -40,6 +71,8 @@ class ChatBot:
         self._stuck_count: int = 0
         self._skip_total: int = 0
         self._page = None
+        self._recover_fail_count: int = 0
+        self._queue_wait_count: int = 0
         # Pick a fresh girl name per bot instance (changes on every 15-min restart)
         self._girl_name: str = random.choice(GIRL_NAMES)
         log(self.name, f"Created — personality: {personality_key}")
@@ -87,26 +120,196 @@ class ChatBot:
             await self._setup_strangerline(page)
         elif name == "TalkWithStranger":
             await self._setup_tws(page)
+        elif name == "Joingy":
+            await self._setup_joingy(page)
+        elif name == "KnotChat":
+            await self._setup_knotchat(page)
         else:
             self._ctx = page
 
+    async def _setup_joingy(self, page: Page) -> None:
+        """Joingy: close promo overlay, ensure 18+ box checked, click Text Only."""
+        self._ctx = page
+        try:
+            # Close the "Girls Roulette" promo overlay if present (its own X button)
+            await page.evaluate("""() => {
+                const closeBtns = [...document.querySelectorAll('*')]
+                    .filter(el => el.offsetParent !== null && el.children.length === 0
+                        && ['×','✕','✖','x'].includes((el.textContent||'').trim()));
+                closeBtns.forEach(b => { try { b.click(); } catch(e) {} });
+            }""")
+            await asyncio.sleep(0.5)
+            # Ensure 18+ checkbox is checked
+            await page.evaluate("""() => {
+                const cb = [...document.querySelectorAll('input[type=checkbox]')]
+                    .find(x => x.offsetParent !== null && !x.checked);
+                if (cb) { cb.click(); cb.dispatchEvent(new Event('change', {bubbles:true})); }
+            }""")
+            await asyncio.sleep(0.5)
+            # Click "Text Only" — walk up from any element containing the text
+            # to its clickable ancestor, and dispatch a real click event.
+            clicked = await page.evaluate("""() => {
+                const all = [...document.querySelectorAll('*')];
+                const hit = all.find(el =>
+                    el.offsetParent !== null &&
+                    (el.textContent || '').toLowerCase().includes('text only') &&
+                    el.children.length <= 2
+                );
+                if (!hit) return false;
+                let target = hit.closest('button,a,[role=button]') || hit;
+                ['mousedown','mouseup','click'].forEach(type => {
+                    target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true}));
+                });
+                return true;
+            }""")
+            if not clicked:
+                try:
+                    await page.click("text=Text Only", timeout=5000)
+                except Exception:
+                    pass
+            log(self.name, "Joingy setup done — waiting for stranger")
+        except Exception as e:
+            log(self.name, f"Joingy setup error: {e}")
+        await asyncio.sleep(4)
+        self._skip_after = 8
+        self._reply_count = 0
+        self._chat_start_time = 0
+
     async def _setup_tws(self, page: Page) -> None:
-        """TalkWithStranger: wait for chat UI to load, dismiss any popups."""
+        """TalkWithStranger: dismiss popups, then click a button to START a new
+        stranger search (after a reload it sits on a 'Stranger Left' screen and
+        will never connect until we click 'Talk to another!' / 'Talk To Strangers')."""
         self._ctx = page
         try:
             for btn_text in ["I Agree", "Accept", "OK", "Got it", "Continue"]:
                 try:
-                    await page.click(f"text={btn_text}", timeout=3000)
-                    await asyncio.sleep(0.5)
+                    await _human_mouse_move(page)
+                    await page.click(f"text={btn_text}", timeout=2500)
+                    await asyncio.sleep(random.uniform(0.6, 1.2))
+                except Exception:
+                    pass
+            # Kick off a fresh stranger search
+            await _human_mouse_move(page)
+            for label in ["Talk to another!", "Talk To Strangers", "Talk to Stranger",
+                          "New Chat", "Start Chat"]:
+                try:
+                    clicked = await page.evaluate("""(txt) => {
+                        const el = [...document.querySelectorAll('button,a,[role=button],div,span')]
+                            .find(x => (x.textContent||'').trim().toLowerCase() === txt.toLowerCase()
+                                       && x.offsetParent !== null);
+                        if (el) { (el.closest('button,a,[role=button]') || el).click(); return true; }
+                        return false;
+                    }""", label)
+                    if clicked:
+                        log(self.name, f"Started search via '{label}'")
+                        break
                 except Exception:
                     pass
             log(self.name, "TalkWithStranger setup done — waiting for stranger")
         except Exception as e:
             log(self.name, f"TalkWithStranger setup error: {e}")
-        await asyncio.sleep(4)
-        self._skip_after = 8
+        await asyncio.sleep(random.uniform(3, 5))
+        self._skip_after = random.uniform(10, 14)  # slower cadence than other sites
         self._reply_count = 0
         self._chat_start_time = 0
+
+    async def _setup_knotchat(self, page: Page) -> None:
+        """KnotChat: Text tab → Start Chatting → Female + 18-23 → START CHATTING
+        → Sign In Anonymously. Uses natural mouse movement + human-like delays
+        to reduce the chance of tripping the Cloudflare check."""
+        self._ctx = page
+        try:
+            await _human_mouse_move(page)
+            try:
+                await page.click("text=Text", timeout=5000)
+            except Exception:
+                pass
+            await asyncio.sleep(random.uniform(0.8, 1.6))
+            await _human_mouse_move(page)
+            await page.click("text=Start Chatting", timeout=8000)
+            await asyncio.sleep(random.uniform(1.5, 2.5))
+
+            await _human_mouse_move(page)
+            await page.click("text=FEMALE", timeout=5000)
+            await asyncio.sleep(random.uniform(0.4, 0.9))
+            await page.click("text=18", timeout=5000)
+            await asyncio.sleep(random.uniform(0.6, 1.0))
+
+            # Click the modal's "START CHATTING" — try native click (waits for the
+            # button to be actionable) then JS-dispatch a real click as backup.
+            await _human_mouse_move(page)
+            for _ in range(5):
+                done = False
+                try:
+                    btn = page.locator("button:has-text('START CHATTING')").last
+                    if await btn.count() > 0:
+                        await btn.click(timeout=3000, force=True)
+                        done = True
+                except Exception:
+                    pass
+                if not done:
+                    try:
+                        done = await page.evaluate("""() => {
+                            const b = [...document.querySelectorAll('button')]
+                                .filter(x => /start chatting/i.test((x.textContent||'').trim())
+                                             && x.offsetParent !== null).pop();
+                            if (b) {
+                                ['mousedown','mouseup','click'].forEach(t =>
+                                    b.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true})));
+                                return true;
+                            }
+                            return false;
+                        }""")
+                    except Exception:
+                        pass
+                try:
+                    still = await page.query_selector("text=Welcome to")
+                    if not still:
+                        break
+                except Exception:
+                    break
+                await asyncio.sleep(0.9)
+            await asyncio.sleep(random.uniform(1.5, 2.5))
+
+            # Sign-in gate (only when NOT already logged in) — hits Cloudflare.
+            await _human_mouse_move(page)
+            try:
+                await page.click("text=Sign In Anonymously", timeout=4000)
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+            except Exception:
+                pass
+
+            # "Partner Filters" modal (appears when logged in) — click Done.
+            await self._knotchat_click_done(page)
+
+            log(self.name, "KnotChat setup done — waiting for stranger")
+        except Exception as e:
+            log(self.name, f"KnotChat setup error: {e}")
+        await asyncio.sleep(4)
+        self._skip_after = 10 ** 9
+        self._reply_count = 0
+        self._chat_start_time = 0
+
+    async def _knotchat_click_done(self, page: Page) -> None:
+        """KnotChat 'Partner Filters' modal — click Done to enter the chat."""
+        try:
+            clicked = await page.evaluate("""() => {
+                const el = [...document.querySelectorAll('button,a,[role=button],div,span')]
+                    .find(x => (x.textContent||'').trim().toLowerCase() === 'done'
+                               && x.offsetParent !== null);
+                if (el) {
+                    const t = el.closest('button,a,[role=button]') || el;
+                    ['mousedown','mouseup','click'].forEach(e =>
+                        t.dispatchEvent(new MouseEvent(e, {bubbles:true, cancelable:true})));
+                    return true;
+                }
+                return false;
+            }""")
+            if clicked:
+                log(self.name, "Clicked Done (Partner Filters)")
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+        except Exception:
+            pass
 
     async def _setup_meetzur(self, page: Page) -> None:
         """Handle Meetzur: agree button → iframe → JS checkbox → enter chat → start."""
@@ -157,8 +360,9 @@ class ChatBot:
         self._reply_count = 0
 
     async def _setup_opentalk(self, page: Page) -> None:
-        """OpenTalk: just use main page, click start."""
+        """OpenTalk: 18+ terms gate (checkbox + Continue) → click start."""
         self._ctx = page
+        await self._accept_opentalk_gate()
         # Click Start button
         await self._click_start()
         await asyncio.sleep(2)
@@ -169,6 +373,32 @@ class ChatBot:
                 await btn.click()
                 log(self.name, "Clicked onboarding gender button")
                 await asyncio.sleep(2)
+        except Exception:
+            pass
+
+    async def _accept_opentalk_gate(self) -> None:
+        """OpenTalk sometimes shows a 'Before you continue' 18+ checkbox gate."""
+        page = self._ctx
+        if not page:
+            return
+        try:
+            checked = await page.evaluate("""() => {
+                const cb = [...document.querySelectorAll('input[type=checkbox]')]
+                    .find(x => x.offsetParent !== null && !x.checked);
+                if (!cb) return false;
+                cb.click();
+                cb.dispatchEvent(new Event('change', {bubbles:true}));
+                return true;
+            }""")
+            if checked:
+                await asyncio.sleep(0.5)
+                await page.evaluate("""() => {
+                    const b = [...document.querySelectorAll('button')]
+                        .find(x => x.textContent.trim() === 'Continue' && !x.disabled);
+                    if (b) b.click();
+                }""")
+                log(self.name, "Accepted 18+ terms gate")
+                await asyncio.sleep(1)
         except Exception:
             pass
 
@@ -322,22 +552,26 @@ class ChatBot:
         return False
 
     async def _setup_onlinestranger(self, page: Page) -> None:
-        """OnlineStranger: accept terms gate, then auto-connects."""
+        """OnlineStranger: accept 18+ terms gate (checkbox + Continue), then auto-connects."""
         self._ctx = page
         try:
-            cb = await page.wait_for_selector("#terms", timeout=10000)
-            if cb:
-                await cb.check()
-                log(self.name, "Checked terms")
+            # Site's gate layout varies (id="terms" not always present) — JS-check
+            # any unchecked visible checkbox, then JS-click the enabled Continue button.
+            await page.wait_for_selector("input[type=checkbox]", timeout=10000)
+            await page.evaluate("""() => {
+                const cb = [...document.querySelectorAll('input[type=checkbox]')]
+                    .find(x => x.offsetParent !== null && !x.checked);
+                if (cb) { cb.click(); cb.dispatchEvent(new Event('change', {bubbles:true})); }
+            }""")
+            await asyncio.sleep(0.5)
+            await page.evaluate("""() => {
+                const b = [...document.querySelectorAll('button')]
+                    .find(x => x.textContent.trim() === 'Continue' && !x.disabled);
+                if (b) b.click();
+            }""")
+            log(self.name, "Accepted terms gate")
         except Exception as e:
-            log(self.name, f"terms checkbox not found: {e}")
-        try:
-            cont = await page.wait_for_selector("text=Continue", timeout=5000)
-            if cont:
-                await cont.click()
-                log(self.name, "Clicked Continue")
-        except Exception as e:
-            log(self.name, f"Continue not found: {e}")
+            log(self.name, f"terms gate not found/failed: {e}")
         await asyncio.sleep(4)
         self._skip_after = 5
         self._reply_count = 0
@@ -401,19 +635,34 @@ class ChatBot:
             log(self.name, f"Start button not found ({start_sel}): {e}")
 
     async def _wait_connected(self, timeout: int = 25) -> bool:
-        """For sites that show a placeholder when connected, wait until connected."""
+        """Wait until a stranger is actually connected before sending."""
         target = self.site.get("connected_placeholder")
-        if not target:
+        connected_text = self.site.get("connected_text")
+        input_ready = self.site.get("connected_when_input_ready")
+        if not target and not connected_text and not input_ready:
             return True
-        input_sel = self.site["input_selector"].split(",")[0].strip()
         for _ in range(timeout):
             try:
-                el = await self._ctx.query_selector(input_sel)
-                # Must be VISIBLE (some sites keep the input in the DOM but hidden
-                # while searching — visibility is the real "connected" signal)
-                if el and await el.is_visible():
-                    p = await el.get_attribute("placeholder") or ""
-                    if target.lower() in p.lower():
+                for sel in self.site["input_selector"].split(","):
+                    el = await self._ctx.query_selector(sel.strip())
+                    if not el or not await el.is_visible():
+                        continue
+                    # Input is present + visible. If it's also enabled, that's a
+                    # reliable "ready to chat" signal on its own.
+                    if input_ready:
+                        disabled = await el.get_attribute("disabled")
+                        readonly = await el.get_attribute("readonly")
+                        if disabled is None and readonly is None:
+                            return True
+                    if target:
+                        p = await el.get_attribute("placeholder") or ""
+                        if target.lower() in p.lower():
+                            return True
+                if connected_text:
+                    body = (await self._ctx.inner_text("body")) or ""
+                    body_lower = body.lower()
+                    phrases = connected_text if isinstance(connected_text, (list, tuple)) else [connected_text]
+                    if any(p.lower() in body_lower for p in phrases):
                         return True
             except Exception:
                 pass
@@ -424,6 +673,30 @@ class ChatBot:
         """Send 3 messages then wait to skip — never waits for stranger reply."""
         # For sites like TalkWithStranger, wait until a stranger actually connects
         if not await self._wait_connected(timeout=15):
+            # If the site shows a searching/queue indicator, DON'T reload — that
+            # would drop our place in the queue. Just wait patiently and retry.
+            searching = self.site.get("searching_text")
+            if searching:
+                try:
+                    body = (await self._ctx.inner_text("body")) or ""
+                    bl = body.lower()
+                    phrases = searching if isinstance(searching, (list, tuple)) else [searching]
+                    if any(p.lower() in bl for p in phrases):
+                        # Wait patiently — but if the queue is clearly frozen
+                        # (hasn't connected after ~90s), reload to retry fresh.
+                        self._queue_wait_count += 1
+                        max_waits = self.site.get("queue_max_waits", 9)
+                        if self._queue_wait_count >= max_waits:
+                            log(self.name, "Queue frozen too long — reloading to retry")
+                            self._queue_wait_count = 0
+                            await self._recover()
+                            return
+                        log(self.name, f"In queue — waiting ({self._queue_wait_count}/{max_waits})")
+                        await asyncio.sleep(10)
+                        return  # retry next loop, keeps queue position
+                except Exception:
+                    pass
+            self._queue_wait_count = 0
             log(self.name, "No stranger yet — restarting search")
             self._stuck_count += 1
             # Recover faster (popups/ads block connection — reload clears them)
@@ -440,6 +713,7 @@ class ChatBot:
                     pass
             await asyncio.sleep(2)
             return  # _chat_start_time stays 0 → retry next loop
+        self._queue_wait_count = 0  # connected — reset queue timer
         age = random.choice(["20", "21", "22", "23", "24", "25"])
         country = random.choice([
             "australia", "aus", "canada", "uk", "usa", "germany",
@@ -474,12 +748,16 @@ class ChatBot:
                 sequence = seq
             else:
                 sequence = [m.replace("strangermeet.org", obf) for m in sequence]
-        await asyncio.sleep(0.3)
+        human_pace = self.site.get("human_pace")
+        # Small settle delay, but send the FIRST message quickly so it lands
+        # before a fast-leaving stranger disconnects.
+        await asyncio.sleep(random.uniform(0.4, 0.8) if human_pace else 0.3)
         sent_ok = 0
-        for msg in sequence:
+        for idx, msg in enumerate(sequence):
             if await self._send(msg):
                 sent_ok += 1
-            await asyncio.sleep(0.3)
+            # Light, natural gap between messages (not so slow the partner leaves)
+            await asyncio.sleep(random.uniform(0.6, 1.2) if human_pace else 0.3)
         if sent_ok == 0:
             # All sends failed — likely an ad popup is blocking the page
             self._stuck_count += 1
@@ -562,11 +840,56 @@ class ChatBot:
         if not box:
             log(self.name, "Input box not found — skipping send")
             return False
+        send_btn_text = self.site.get("send_button_text")
+        human_pace = self.site.get("human_pace")
+        try_all = self.site.get("send_try_all")
         try:
             await box.click(timeout=4000)
             await box.fill("")
-            await box.type(text, delay=random.randint(3, 10))
-            if self.site.get("send_via_js"):
+            # Human-like typing: slower, slightly variable per keystroke
+            await box.type(text, delay=random.randint(12, 35) if human_pace else random.randint(3, 10))
+            await asyncio.sleep(random.uniform(0.2, 0.6) if human_pace else 0.1)
+            if try_all:
+                # Try every known submit method. The input clears after a
+                # successful send, so any extra attempts are harmless no-ops.
+                first = input_sel.split(",")[0].strip()
+                try:
+                    await ctx.keyboard.press("Enter")
+                except Exception:
+                    pass
+                await asyncio.sleep(0.15)
+                # Click a "SEND" control — match ANY visible element whose exact
+                # trimmed text is the label, then click its clickable ancestor.
+                try:
+                    await ctx.evaluate("""(label) => {
+                        const els = [...document.querySelectorAll('button,a,[role=button],input[type=submit],div,span')]
+                            .filter(el => el.offsetParent !== null);
+                        const hit = els.find(el => (el.textContent || el.value || '').trim().toUpperCase() === label);
+                        if (hit) {
+                            const target = hit.closest('button,a,[role=button]') || hit;
+                            target.click();
+                            if (target !== hit) { try { hit.click(); } catch(e) {} }
+                        }
+                    }""", (send_btn_text or "SEND").upper())
+                except Exception:
+                    pass
+                await asyncio.sleep(0.15)
+                # Click the last button/icon in the input's row (paper-plane icon)
+                try:
+                    await ctx.evaluate("""(sel) => {
+                        const inp = document.querySelector(sel);
+                        if (!inp) return;
+                        let row = inp.parentElement;
+                        for (let i = 0; i < 5 && row; i++) {
+                            const btns = [...row.querySelectorAll('button,[role=button],svg')]
+                                .filter(el => el.offsetParent !== null);
+                            if (btns.length) { btns[btns.length - 1].click(); return; }
+                            row = row.parentElement;
+                        }
+                    }""", first)
+                except Exception:
+                    pass
+            elif self.site.get("send_via_js"):
                 # Click the last button in the input's row (the send icon button)
                 await asyncio.sleep(0.2)
                 await ctx.evaluate("""(sel) => {
@@ -578,6 +901,24 @@ class ChatBot:
                     const btns = [...row.querySelectorAll('button')];
                     if (btns.length) btns[btns.length - 1].click();
                 }""", input_sel.split(",")[0].strip())
+            elif send_btn_text:
+                try:
+                    await ctx.keyboard.press("Enter")
+                except Exception:
+                    pass
+                await asyncio.sleep(0.15)
+                clicked = await ctx.evaluate("""(label) => {
+                    const btns = [...document.querySelectorAll('button,a,[role=button],input[type=submit]')]
+                        .filter(el => el.offsetParent !== null);
+                    const b = btns.find(el => (el.textContent || el.value || '').trim().toUpperCase() === label.toUpperCase());
+                    if (b) { b.click(); return true; }
+                    return false;
+                }""", send_btn_text)
+                if not clicked:
+                    try:
+                        await ctx.click(f"text={send_btn_text}", timeout=2000)
+                    except Exception:
+                        pass
             elif send_sel:
                 btn = await ctx.query_selector(send_sel)
                 if btn:
@@ -612,6 +953,9 @@ class ChatBot:
                     log(self.name, "Time up — skipping")
                     await self._skip_chat()
             except Exception as e:
+                if _is_fatal_connection_error(e):
+                    log(self.name, f"Browser/driver connection lost — stopping this tab: {e}")
+                    return
                 log(self.name, f"Loop error: {e}")
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -653,6 +997,36 @@ class ChatBot:
             except Exception:
                 pass
 
+        # OnlineStranger's 18+ terms gate can pop back up after a skip/reconnect
+        if self.name == "OnlineStranger":
+            try:
+                reappeared = await self._ctx.evaluate("""() => {
+                    const cb = [...document.querySelectorAll('input[type=checkbox]')]
+                        .find(x => x.offsetParent !== null && !x.checked);
+                    if (!cb) return false;
+                    cb.click();
+                    cb.dispatchEvent(new Event('change', {bubbles:true}));
+                    return true;
+                }""")
+                if reappeared:
+                    await asyncio.sleep(0.5)
+                    await self._ctx.evaluate("""() => {
+                        const b = [...document.querySelectorAll('button')]
+                            .find(x => x.textContent.trim() === 'Continue' && !x.disabled);
+                        if (b) b.click();
+                    }""")
+                    log(self.name, "Re-accepted terms gate")
+            except Exception:
+                pass
+
+        # OpenTalk's 18+ terms gate can pop back up after a skip/reconnect
+        if self.name.startswith("OpenTalk"):
+            await self._accept_opentalk_gate()
+
+        # KnotChat's "Partner Filters" (Done) modal can reappear between chats
+        if self.name == "KnotChat":
+            await self._knotchat_click_done(self._ctx)
+
     async def _run_site_setup(self, page: Page) -> None:
         """Run the correct site-specific setup (used on first load and recovery)."""
         name = self.name
@@ -676,22 +1050,54 @@ class ChatBot:
             await self._setup_ome(page)
         elif name == "StrangerLine":
             await self._setup_strangerline(page)
+        elif name == "Joingy":
+            await self._setup_joingy(page)
+        elif name == "KnotChat":
+            await self._setup_knotchat(page)
         else:
             self._ctx = page
 
     async def _recover(self) -> None:
-        """Reload the page to clear ad popups / stuck states, then re-run setup."""
+        """Reload the page to clear ad popups / stuck states, then re-run setup.
+        Backs off with longer waits on repeated failures (e.g. a site temporarily
+        rate-limiting/blocking rapid reloads) instead of hammering it immediately."""
         log(self.name, "Stuck — reloading page to recover")
         self._stuck_count = 0
         if not self._page:
             return
+        if self._recover_fail_count > 0:
+            backoff = min(5 * (2 ** self._recover_fail_count), 60)
+            log(self.name, f"Backing off {backoff}s before retrying (site may be rate-limiting)")
+            await asyncio.sleep(backoff)
+        # Optionally wipe this site's cookies before reloading so each new
+        # stranger sees a "fresh browser" (domain-scoped so other tabs are safe).
+        clear_domain = self.site.get("clear_cookies_domain")
+        if clear_domain and self._page:
+            try:
+                await self._page.context.clear_cookies(domain=clear_domain)
+                log(self.name, f"Cleared cookies for {clear_domain}")
+            except Exception:
+                pass
+        # Clear local/session storage too — helps escape a shadow-park that keys
+        # off a stored client id rather than IP.
+        if self.site.get("clear_storage_on_reload") and self._page:
+            try:
+                await self._page.evaluate(
+                    "() => { try { localStorage.clear(); sessionStorage.clear(); } catch(e) {} }"
+                )
+            except Exception:
+                pass
         try:
             await self._page.goto(self.site["url"], wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(3)
             await self._run_site_setup(self._page)
             log(self.name, "Recovered — resuming")
+            self._recover_fail_count = 0
         except Exception as e:
-            log(self.name, f"Recover failed: {e}")
+            if _is_fatal_connection_error(e):
+                raise
+            self._recover_fail_count += 1
+            log(self.name, f"Recover failed (attempt {self._recover_fail_count}): {e}")
 
     async def _auto_reconnect_if_needed(self) -> None:
         """If stranger disconnected and reconnect button is visible, click it."""
@@ -708,7 +1114,7 @@ class ChatBot:
                 self.promo_done = False
                 self._reply_count = 0
                 self._skip_after = 5
-                await asyncio.sleep(3)
+                await asyncio.sleep(1)
                 self._chat_start_time = 0
         except Exception:
             pass
@@ -718,7 +1124,28 @@ class ChatBot:
         skip_sel = self.site.get("disconnect_selector") or self.site.get("start_selector")
         reconnect_sel = self.site.get("reconnect_selector")
         confirm_sel = self.site.get("confirm_selector")
-        if not skip_sel or not self._ctx:
+        if not self._ctx:
+            return
+
+        # Reload-based skip works even without a skip button — just reload the
+        # page and re-run setup for a fresh stranger.
+        if self.site.get("reload_on_skip"):
+            self._skip_total += 1
+            if skip_sel:
+                try:
+                    btn = await self._ctx.query_selector(skip_sel)
+                    if btn and await btn.is_visible():
+                        await btn.click(timeout=4000)  # politely end the chat first
+                except Exception:
+                    pass
+            wait = self.site.get("post_skip_wait", 0)
+            if wait:
+                log(self.name, f"Break {wait:.0f}s before next stranger")
+                await asyncio.sleep(wait)
+            await self._recover()  # reload + re-enter for a fresh stranger
+            return
+
+        if not skip_sel:
             return
         setup_sel = self.site.get("setup_click")
 
@@ -729,19 +1156,32 @@ class ChatBot:
             await self._recover()
             return
 
-        # Viby: modal won't reopen via "End Chat" — reload + re-enter each skip
-        if self.site.get("reload_on_skip"):
+        # Joingy: double-click Leave Chat, then click START A NEW CHAT
+        if self.site.get("double_skip_then_reconnect"):
             try:
                 btn = await self._ctx.query_selector(skip_sel)
                 if btn and await btn.is_visible():
-                    await btn.click(timeout=4000)  # politely end the chat first
+                    await btn.click(timeout=4000)
+                    await asyncio.sleep(0.15)
+                    await btn.click(timeout=4000)
             except Exception:
                 pass
-            wait = self.site.get("post_skip_wait", 0)
-            if wait:
-                log(self.name, f"Break {wait:.0f}s before next stranger")
-                await asyncio.sleep(wait)
-            await self._recover()  # reload + re-enter for a fresh stranger
+            await asyncio.sleep(1.0)
+            if reconnect_sel:
+                try:
+                    new_btn = await self._ctx.wait_for_selector(reconnect_sel, timeout=5000)
+                    if new_btn and await new_btn.is_visible():
+                        await new_btn.click(timeout=4000)
+                except Exception:
+                    pass
+            log(self.name, "Skipped (double + reconnect) — waiting for new stranger")
+            self.seen_messages.clear()
+            self.history.clear()
+            self.promo_done = False
+            self._reply_count = 0
+            wait = self.site.get("post_skip_wait", 1.5)
+            await asyncio.sleep(wait)
+            self._chat_start_time = 0
             return
 
         # JS-click the skip button (intercepted button / icon-only) — auto-reconnects
@@ -878,6 +1318,8 @@ class BotManager:
     # Restart the whole browser this often to clear caches/memory and stay fast
     RESTART_EVERY_SECONDS = 30 * 60
 
+    STORAGE_STATE_PATH = os.path.join(os.path.dirname(__file__), "browser_session.json")
+
     async def run(self) -> None:
         # Outer loop: every RESTART_EVERY_SECONDS, tear everything down and start fresh.
         while True:
@@ -891,14 +1333,28 @@ class BotManager:
             chrome_path = _find_chrome()
             launch_kwargs: dict = {
                 "headless": False,
-                "args": ["--no-sandbox", "--start-maximized"],
+                "args": [
+                    "--no-sandbox",
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                ],
             }
             if chrome_path:
                 launch_kwargs["executable_path"] = chrome_path
-            browser: Browser = await pw.chromium.launch(**launch_kwargs)
+            browser: Browser = await asyncio.wait_for(
+                pw.chromium.launch(**launch_kwargs), timeout=30
+            )
             # One shared context so all sites open as TABS in a single window,
             # and no_viewport lets each tab fill the maximized window (input visible).
-            context = await browser.new_context(no_viewport=True)
+            # Reuse a saved login session (e.g. KnotChat Gmail) across restarts.
+            context_kwargs: dict = {"no_viewport": True}
+            if os.path.exists(self.STORAGE_STATE_PATH):
+                context_kwargs["storage_state"] = self.STORAGE_STATE_PATH
+            try:
+                context = await browser.new_context(**context_kwargs)
+            except Exception as e:
+                log("manager", f"new_context with saved session failed ({e}) — starting fresh")
+                context = await browser.new_context(no_viewport=True)
             tasks = []
             for i, site in enumerate(self.site_configs):
                 personality = personality_keys[i % len(personality_keys)]
@@ -908,21 +1364,40 @@ class BotManager:
                 log("manager", f"Tab opened for '{site['name']}' [{personality}]")
                 await asyncio.sleep(1)  # stagger tab launches slightly
 
+            # Watchdog: if the browser dies unexpectedly (crash / manually closed),
+            # detect it immediately instead of waiting for the full restart timer.
+            disconnected_event = asyncio.Event()
+            browser.on("disconnected", lambda: disconnected_event.set())
+
+            async def _watch_disconnect():
+                await disconnected_event.wait()
+                log("manager", "Browser disconnected unexpectedly — restarting now")
+
+            watchdog_task = asyncio.create_task(_watch_disconnect())
+            gather_task = asyncio.gather(*tasks, return_exceptions=True)
+
             try:
-                # Run the bots, but only for the restart window
-                await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True),
+                done, pending = await asyncio.wait(
+                    [gather_task, watchdog_task],
                     timeout=self.RESTART_EVERY_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-            except asyncio.TimeoutError:
-                log("manager", f"{self.RESTART_EVERY_SECONDS // 60} min up — restarting browser")
+                if not done:
+                    log("manager", f"{self.RESTART_EVERY_SECONDS // 60} min up — restarting browser")
             except asyncio.CancelledError:
                 pass
             finally:
+                watchdog_task.cancel()
+                gather_task.cancel()
+                try:
+                    await context.storage_state(path=self.STORAGE_STATE_PATH)
+                    log("manager", "Saved login session for next restart")
+                except Exception as e:
+                    log("manager", f"Could not save session: {e}")
                 for t in tasks:
                     t.cancel()
                 try:
-                    await browser.close()
+                    await asyncio.wait_for(browser.close(), timeout=15)
                 except Exception:
                     pass
                 log("manager", "Browser closed.")

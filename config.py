@@ -25,7 +25,7 @@ REPLY_DELAY_MIN = 1
 REPLY_DELAY_MAX = 3
 
 # Seconds between polling for new messages
-POLL_INTERVAL = 2
+POLL_INTERVAL = 1
 
 # Minimum message length to bother replying to
 MIN_MESSAGE_LENGTH = 1
@@ -64,8 +64,26 @@ PROMO_TRIGGERS = [
 #   name             - friendly label used in logs
 CHAT_SITES = [
     {
+        "name": "KnotChat",
+        "url": "https://knot.chat/",
+        "message_selector": "[class*=message]",
+        "input_selector": "input[placeholder*='message' i], textarea[placeholder*='message' i], textarea, input[type='text']",
+        "send_selector": None,
+        "send_button_text": "Send",
+        "send_try_all": True,
+        "knotchat_setup": True,
+        "reconnect_selector": "text=Restart",
+        "passive_skip_only": True,
+        "post_skip_wait": 2,
+        "connected_when_input_ready": True,
+        "system_skip_keywords": [
+            "connected", "stranger", "looking", "matched", "say hi", "partner has left",
+        ],
+    },
+    {
         "name": "SillyChat",
         "url": "https://silly.chat/text-chat",
+        "clear_cookies_domain": "silly.chat",
         "message_selector": "[class*=message]",        # not used (bot only blasts)
         "input_selector": "input[placeholder='Message...']",
         "send_selector": None,                          # Enter key sends
@@ -81,6 +99,8 @@ CHAT_SITES = [
     {
         "name": "OnlineStranger",
         "url": "https://onlinestranger.com/chat",
+        "clear_cookies_domain": "onlinestranger.com",
+        "clear_storage_on_reload": True,
         "message_selector": "[class*=message]",     # not used (bot only blasts)
         "input_selector": ".flex-1.bg-transparent",
         "send_selector": None,                        # custom JS send
@@ -91,32 +111,26 @@ CHAT_SITES = [
         "reconnect_selector": "text=Find New Stranger",
         "connected_placeholder": "Type a message",
         "dismiss_selectors": ["text=Maybe Later"],   # auto-dismiss popups
+        "searching_text": ["looking for a stranger", "position in queue", "please wait while we connect"],
+        "queue_max_waits": 5,                         # reload sooner if queue is frozen
         "system_skip_keywords": [
             "you are now", "stranger has disconnected", "looking for",
             "connected", "find new stranger",
         ],
     },
     {
-        "name": "IncogChats",
-        "url": "https://www.incogchats.com/chat-app",
-        "message_selector": "[class*=message]",
-        "input_selector": "textarea[placeholder*='Type a message']",
-        "send_selector": None,
-        "start_selector": None,
-        "incog_setup": True,
-        "disconnect_selector": "button[aria-label='Skip and find new partner']",
-        "js_skip_aria": "Skip",
-        "post_skip_wait": 10,
-        "connected_placeholder": "Type a message",
-        "obfuscate_url": [
-            "strangermeet dot org (dot = period)",
-            "strangermeet dot org (dot means period)",
-            "strangermeet . org",
-            "strangermeet(.)org",
-            "strangermeet[.]org",
-        ],
+        "name": "OpenTalk",
+        "url": "https://opentalk.club/text/",
+        "clear_cookies_domain": "opentalk.club",
+        "message_selector": "#chatMsgs .msg.them",
+        "input_selector": "#chatInput",
+        "send_selector": "#chatSend",
+        "start_selector": "#startBtn",
+        "disconnect_selector": "#startBtn",
+        "onboard_click": ".ot-onb-action",
         "system_skip_keywords": [
-            "connected", "stranger", "looking", "matched", "say hi",
+            "chatting with a stranger", "stranger has disconnected",
+            "looking for", "connected", "are you a girl",
         ],
     },
 ]
